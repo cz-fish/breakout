@@ -10,12 +10,16 @@ class Setup:
     FPS = 60
 
     PaddleLimit = (0, 1024)
-    PaddleSpeed = int((PaddleLimit[1] - PaddleLimit[0])/(0.9 * FPS))
+    PaddleSpeed = int((PaddleLimit[1] - PaddleLimit[0])/(0.75 * FPS))
     BallSpeed = 2.75
     BoardSize = (320, 240)
+    # NOTE: it is important that the length of BrickStartupPattern is the
+    #       same as the sum of BrickGroupSizes (which equals to BrickLines)
     BrickStartupPattern = ([1]*4 + [0]*2)*3 + [0]*(4+2)*2
     BrickGroupSizes = [6, 6, 6, 6, 6]
+    BrickGroupPoints = [5, 4, 3, 2, 1, 0]
     BrickLines = sum(BrickGroupSizes)
+    AdditionalLines = [0]*2 + [1]*4
 
 # 10 bricks per line: width 30, border 1, margin 0
 # 16 bricks per line: width 18, border 1, margin 0
@@ -64,6 +68,15 @@ def get_brick_index(pos):
     col = (pos[0] - Setup.BoardMargin[0]) / (Setup.BrickSize[0] + 2 * Setup.BrickBorder[0])
     return (int(row), int(col))
 
+def get_brick_points(row):
+    row = max(0, min(Setup.BrickLines, row))
+    accu = 0
+    i = 0
+    while accu <= row:
+        accu += Setup.BrickGroupSizes[i]
+        i += 1
+    return Setup.BrickGroupPoints[i - 1]
+
 def get_ball_rect(pos):
     return (int(pos[0]), int(pos[1])) + Setup.BallSize
 
@@ -86,10 +99,15 @@ class Gamestate:
         self.brick_matrix = [ [i] * Setup.BricksPerLine for i in Setup.BrickStartupPattern ]
         self.score = 0
         self.stopped = True
+        self.next_falldown_threshold = 2 * Setup.BricksPerLine
+        self.next_speedup_threshold = 2 * Setup.BricksPerLine
+        self.falldown_threshold = self.next_falldown_threshold
         self.has_ball = False
+        self.next_additional_line = 0
 
     def throw_ball(self):
         self.speed = Setup.BallSpeed
+        self.speedup_threshold = self.next_speedup_threshold
         self.ball = (random.randint(0, Setup.BoardSize[0]-1), Setup.BoardSize[1]/3.0)
         self.ball_collisions = False
         self.ball_vector = vector_from_angle((random.random() * 4 + 7) * math.pi / 6, self.speed)
@@ -175,6 +193,7 @@ class Gamestate:
                 self.ball_vector = vector_from_angle(angle, self.speed)
             # deactivate ball ghost mode after first bounce
             self.ball_collisions = True
+            self.increase_difficulty(1)
             return (collision_x, collision_y)
 
     def collide_with_bricks(self, newball, brick_index_topleft):
@@ -241,12 +260,38 @@ class Gamestate:
             self.ball_vector = (-self.ball_vector[0], self.ball_vector[1])
 
         self.brick_matrix[row][col] = 0
-        # TODO: score, speed, drop bricks, etc.
+        brick_points = get_brick_points(row)
+        self.score += brick_points
+        self.increase_difficulty(brick_points)
         return (collision_x, collision_y)
 
     def ball_dropped(self):
         self.has_ball = False
         self.stopped = True
+
+    def increase_difficulty(self, amount):
+        self.falldown_threshold -= 1
+        if self.falldown_threshold <= 0:
+            self.drop_wall()
+
+        # increase speed
+        self.speedup_threshold -= amount
+        if self.speedup_threshold <= 0:
+            newspeed = min(self.speed * 1.25, 5.0)
+            coef = newspeed / self.speed
+            self.ball_vector = (self.ball_vector[0] * coef, self.ball_vector[1] * coef)
+            self.speed = newspeed
+            print "speed {}".format(newspeed)
+            self.speedup_threshold = self.next_speedup_threshold
+            
+
+    def drop_wall(self):
+        self.falldown_threshold = self.next_falldown_threshold
+        self.next_falldown_threshold = max(10, int(0.92 * self.next_falldown_threshold))
+        print "falldown {}, next {}".format(self.falldown_threshold, self.next_falldown_threshold)
+        newline = [Setup.AdditionalLines[self.next_additional_line]] * Setup.BricksPerLine
+        self.next_additional_line = (self.next_additional_line + 1) % len(Setup.AdditionalLines)
+        self.brick_matrix = [newline] + self.brick_matrix[:-1]
 
 class KeyboardController:
     def __init__(self):

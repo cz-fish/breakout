@@ -11,7 +11,7 @@ class Setup:
 
     PaddleLimit = (0, 1024)
     PaddleSpeed = int((PaddleLimit[1] - PaddleLimit[0])/(0.9 * FPS))
-    BallSpeed = 3.5
+    BallSpeed = 2.75
     BoardSize = (320, 240)
     BrickStartupPattern = ([1]*4 + [0]*2)*3 + [0]*(4+2)*2
     BrickGroupSizes = [6, 6, 6, 6, 6]
@@ -81,7 +81,7 @@ class Gamestate:
 
     def throw_ball(self):
         self.speed = Setup.BallSpeed
-        self.ball = (random.randint(0, Setup.BoardSize[0]-1), Setup.BoardSize[1]/2)
+        self.ball = (random.randint(0, Setup.BoardSize[0]-1), Setup.BoardSize[1]/3.0)
         self.ball_collisions = False
         self.ball_vector = vector_from_angle((random.random() * 4 + 7) * math.pi / 6, self.speed)
         self.has_ball = True
@@ -111,13 +111,9 @@ class Gamestate:
             x = 2 * max_x - x
             revert_x = True
 
-        # FIXME: do not bouce off the bottom edge
-        max_y = Setup.PaddleTop - Setup.BallSize[1]
+        # do not bouce off the bottom edge
         if y < 0:
             y = -y
-            revert_y = True
-        elif y > max_y:
-            y = 2 * max_y - y
             revert_y = True
 
         self.ball_vector = ([self.ball_vector[0], -self.ball_vector[0]][revert_x], \
@@ -125,8 +121,47 @@ class Gamestate:
         return (x, y)
 
     def collide(self, newball):
+        if newball[1] >= Setup.PaddleTop - Setup.BallSize[1]:
+            return self.collide_with_paddle(newball)
+        # collide with bricks
         #TODO
         return newball
+
+    def collide_with_paddle(self, newball):
+        collision_y = Setup.PaddleTop - Setup.BallSize[1]
+        collision_x = self.ball[0] + (collision_y - self.ball[1]) * self.ball_vector[0] / self.ball_vector[1]
+        
+        ball_x_middle = collision_x + Setup.BallSize[0] / 2.0
+        paddle = get_paddle_rect(self.pad_pos)
+        # cushion of 1 ball size around the paddle from each side
+        big_paddle_left = paddle[0] - Setup.BallSize[0]
+        big_paddle_right = big_paddle_left + Setup.PaddleSize[0] + 2 * Setup.BallSize[0]
+        big_paddle_third = (big_paddle_right - big_paddle_left) / 3.0
+
+        if ball_x_middle < big_paddle_left or ball_x_middle > big_paddle_right:
+            # ball dropped
+            self.ball_dropped()
+            return newball
+        else:
+            # ball bounces off paddle
+            if ball_x_middle < big_paddle_left + big_paddle_third:
+                # left end of the paddle. Angle in second quadrant based on collision position
+                v = (ball_x_middle - big_paddle_left) / big_paddle_third
+                angle = (math.pi * 11/12) - v * math.pi / 3
+                self.ball_vector = vector_from_angle(angle, self.speed)
+            elif ball_x_middle < big_paddle_left + 2 * big_paddle_third:
+                # middle part of the paddle. Angle preserved
+                self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
+            else:
+                # right end of the paddle. Angle in first quadrant based on collision position
+                v = (big_paddle_right - ball_x_middle) / big_paddle_third
+                angle = (math.pi * 1/12) + v * math.pi / 3
+                self.ball_vector = vector_from_angle(angle, self.speed)
+            return (collision_x, collision_y)
+
+    def ball_dropped(self):
+        self.has_ball = False
+        self.stopped = True
 
 class KeyboardController:
     def __init__(self):

@@ -15,6 +15,7 @@ class Setup:
     BoardSize = (320, 240)
     BrickStartupPattern = ([1]*4 + [0]*2)*3 + [0]*(4+2)*2
     BrickGroupSizes = [6, 6, 6, 6, 6]
+    BrickLines = sum(BrickGroupSizes)
 
 # 10 bricks per line: width 30, border 1, margin 0
 # 16 bricks per line: width 18, border 1, margin 0
@@ -37,6 +38,7 @@ class Color:
     red = (153, 0, 0)
     green = (0, 204, 0)
     yellow = (255, 235, 0)
+    gray = (60, 60, 60)
 
 
 def vector_from_angle(rad_angle, length):
@@ -54,6 +56,13 @@ def get_brick_rect(row, col):
     return (Setup.BoardMargin[0] + col * t[0] + Setup.BrickBorder[0], \
             Setup.BoardMargin[1] + row * t[1] + Setup.BrickBorder[1]) \
            + Setup.BrickSize
+
+def get_brick_index(pos):
+    row = (pos[1] - Setup.BoardMargin[1]) / (Setup.BrickSize[1] + 2 * Setup.BrickBorder[1])
+    if row >= Setup.BrickLines:
+        return None
+    col = (pos[0] - Setup.BoardMargin[0]) / (Setup.BrickSize[0] + 2 * Setup.BrickBorder[0])
+    return (int(row), int(col))
 
 def get_ball_rect(pos):
     return (int(pos[0]), int(pos[1])) + Setup.BallSize
@@ -124,7 +133,14 @@ class Gamestate:
         if newball[1] >= Setup.PaddleTop - Setup.BallSize[1]:
             return self.collide_with_paddle(newball)
         # collide with bricks
-        #TODO
+        if not self.ball_collisions:
+            # ball is in ghost mode after it has been thrown.
+            # no collisions with bricks until it hits the paddle
+            return newball
+        brick_index = get_brick_index(newball)
+        if brick_index:
+            return self.collide_with_bricks(newball, brick_index)
+        # no collision
         return newball
 
     def collide_with_paddle(self, newball):
@@ -157,7 +173,76 @@ class Gamestate:
                 v = (big_paddle_right - ball_x_middle) / big_paddle_third
                 angle = (math.pi * 1/12) + v * math.pi / 3
                 self.ball_vector = vector_from_angle(angle, self.speed)
+            # deactivate ball ghost mode after first bounce
+            self.ball_collisions = True
             return (collision_x, collision_y)
+
+    def collide_with_bricks(self, newball, brick_index_topleft):
+        # because the ball is bigger than a pixel, it can collide with up to 4 bricks.
+        # we need to select just one brick to collide with
+        brick_index_bottomright = get_brick_index((newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1]))
+        if not brick_index_bottomright or brick_index_topleft == brick_index_bottomright:
+            colliding_brick_indices = [brick_index_topleft]
+        else:
+            row_min = brick_index_topleft[0]
+            row_max = brick_index_bottomright[0]
+            col_min = brick_index_topleft[1]
+            col_max = brick_index_bottomright[1]
+            if row_min != row_max:
+                # either bottom row first or top row first based on the ball vector direction
+                rows = [ [row_min, row_max], # ball is going down
+                         [row_max, row_min]  # ball is going up
+                       ] [self.ball_vector[1] < 0]
+            else:
+                rows = [row_min]
+            if col_min != col_max:
+                # either left first or right first based on the ball vector direction
+                cols = [ [col_min, col_max], # ball is going right
+                         [col_max, col_min]  # ball is going left
+                       ] [self.ball_vector[0] < 0]
+            else:
+                cols = [col_min]
+            colliding_brick_indices = [(row, col) for row in rows for col in cols]
+
+        for row, col in colliding_brick_indices:
+            if self.brick_matrix[row][col]:
+                return self.collide_with_brick(newball, row, col)
+        # none of the potentially colliding bricks exists in the matrix, no collision
+        return newball
+
+    def collide_with_brick(self, newball, row, col):
+        brick = get_brick_rect(row, col)
+        brick_bbox = (brick[0] - Setup.BallSize[0], # left
+                      brick[1] - Setup.BallSize[1], # top
+                      brick[0] + brick[2],          # right
+                      brick[1] + brick[3])          # bottom
+
+        # first assume that the collision was on the top or the bottom edge
+        if self.ball_vector[1] > 0:
+            # ball going down, collision spot is the top edge of the brick
+            collision_y = brick_bbox[1]
+        else:
+            # ball going up, collision spot is the bottom edge of the brick
+            collision_y = brick_bbox[3]
+        collision_x = self.ball[0] + (collision_y - self.ball[1]) * self.ball_vector[0] / self.ball_vector[1]
+
+        if collision_x >= brick_bbox[0] and collision_x <= brick_bbox[2]:
+            # the collision was indeed on one of the horizontal edges
+            # switch the vertical direction, keep horizontal direction
+            self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
+        else:
+            # the collision was actually on a vertical edge
+            if collision_x < brick_bbox[0]:
+                collision_x = brick_bbox[0]
+            else:
+                collision_x = brick_bbox[2]
+            collision_y = self.ball[1] + (collision_x - self.ball[0]) * self.ball_vector[1] / self.ball_vector[0]
+            # switch the horizontal direction, keep vertical direction
+            self.ball_vector = (-self.ball_vector[0], self.ball_vector[1])
+
+        self.brick_matrix[row][col] = 0
+        # TODO: score, speed, drop bricks, etc.
+        return (collision_x, collision_y)
 
     def ball_dropped(self):
         self.has_ball = False
@@ -197,6 +282,7 @@ class App:
     def __init__(self):
         pygame.init()
         self.display = pygame.display.set_mode(Setup.DisplaySize, 0)
+        pygame.display.set_caption("Breakout")
         self.surface = pygame.Surface(Setup.BoardSize)
         self.state = Gamestate()
         self._prepare_color_overlay()
@@ -226,6 +312,9 @@ class App:
     def render(self):
         self.surface.fill(Color.black)
 
+        # a bottom bar for better orientation
+        pygame.draw.rect(self.surface, Color.gray, (0, Setup.PaddleTop, Setup.BoardSize[0], Setup.BoardSize[1]))
+
         # draw bricks
         row_idx = 0
         for row in self.state.brick_matrix:
@@ -233,7 +322,6 @@ class App:
             for col in row:
                 if col:
                     pygame.draw.rect(self.surface, Color.white, get_brick_rect(row_idx, col_idx))
-                    #pygame.draw.rect(self.surface, Color.white, (x+1, y+1, Setup.BrickSize[0], Setup.BrickSize[1]))
                 col_idx += 1
             row_idx += 1
 

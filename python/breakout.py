@@ -9,6 +9,7 @@ class Setup:
     DisplaySize = (800, 600)
     FPS = 60
 
+    Lives = 5
     PaddleLimit = (0, 1024)
     PaddleSpeed = int((PaddleLimit[1] - PaddleLimit[0])/(0.75 * FPS))
     BallSpeed = 2.75
@@ -43,6 +44,86 @@ class Color:
     green = (0, 204, 0)
     yellow = (255, 235, 0)
     gray = (60, 60, 60)
+
+class SevenSeg:
+    #    1
+    #  2    4
+    #    8
+    # 16   32
+    #   64
+    to7seg = {
+        '0': 1 + 2 + 4 + 16 + 32 + 64,
+        '1': 4 + 32,
+        '2': 1 + 4 + 8 + 16 + 64,
+        '3': 1 + 4 + 8 + 32 + 64,
+        '4': 2 + 4 + 8 + 32,
+        '5': 1 + 2 + 8 + 32 + 64,
+        '6': 1 + 2 + 8 + 16 + 32 + 64,
+        '7': 1 + 4 + 32,
+        '8': 1 + 2 + 4 + 8 + 16 + 32 + 64,
+        '9': 1 + 2 + 4 + 8 + 32 + 64,
+        'H': 4096 + 8192 + 8 + 1024 + 2048,
+        'I': 4096 + 1024,
+        'G': 1 + 2 + 16 + 32 + 64 + 128,
+        'A': 1 + 2 + 4 + 8 + 1024 + 2048,
+        'M': 1 + 2 + 4 + 1024 + 2048 + 256,
+        'E': 1 + 2 + 8 + 16 + 64,
+        'O': 1 + 2 + 4 + 16 + 32 + 64,
+        'V': 4096 + 8192 + 16 + 32 + 64,
+        'R': 1 + 2 + 4 + 8 + 1024 + 512
+    }
+    segsize = 3
+
+    def __init__(self, surface):
+        self.surface = surface
+        self.charwidth = self.segsize + 3
+
+    def draw_text(self, topleft, text):
+        x = topleft[0]
+        for d in text:
+            if d in self.to7seg:
+                v = self.to7seg[d]
+            else:
+                v = 0
+            self.draw_single_digit(Color.white, (x, topleft[1]), v)
+            x += self.charwidth
+
+    def draw_single_digit(self, color, topleft, digit):
+        s = self.segsize
+        x0 = topleft[0]
+        x1 = topleft[0] + s + 1
+        y0 = topleft[1]
+        y1 = topleft[1] + s + 1
+        y2 = topleft[1] + 2*s + 2
+        xm = (x0 + x1) / 2
+        if digit & 1:
+            pygame.draw.line(self.surface, color, (x0+1, y0), (x1-1, y0))
+        if digit & 2:
+            pygame.draw.line(self.surface, color, (x0, y0+1), (x0, y1-1))
+        if digit & 4:
+            pygame.draw.line(self.surface, color, (x1, y0+1), (x1, y1-1))
+        if digit & 8:
+            pygame.draw.line(self.surface, color, (x0+1, y1), (x1-1, y1))
+        if digit & 16:
+            pygame.draw.line(self.surface, color, (x0, y1+1), (x0, y2-1))
+        if digit & 32:
+            pygame.draw.line(self.surface, color, (x1, y1+1), (x1, y2-1))
+        if digit & 64:
+            pygame.draw.line(self.surface, color, (x0+1, y2), (x1-1, y2))
+        if digit & 128:
+            pygame.draw.line(self.surface, color, (xm, y1), (x1-1, y1))
+        if digit & 256:
+            pygame.draw.line(self.surface, color, (xm, y0+1), (xm, y1-1))
+        if digit & 512:
+            pygame.draw.line(self.surface, color, (x0+1, y1+1), (x1, y2))
+        if digit & 1024:
+            pygame.draw.line(self.surface, color, (x0, y1+1), (x0, y2))
+        if digit & 2048:
+            pygame.draw.line(self.surface, color, (x1, y1+1), (x1, y2))
+        if digit & 4096:
+            pygame.draw.line(self.surface, color, (x0, y0), (x0, y1-1))
+        if digit & 8192:
+            pygame.draw.line(self.surface, color, (x1, y0), (x1, y1-1))
 
 
 def vector_from_angle(rad_angle, length):
@@ -92,6 +173,7 @@ def get_color_rects():
 
 class Gamestate:
     def __init__(self):
+        self.hiscore = 0
         self.reset_game()
 
     def reset_game(self):
@@ -102,6 +184,7 @@ class Gamestate:
         self.next_falldown_threshold = 2 * Setup.BricksPerLine
         self.next_speedup_threshold = 2 * Setup.BricksPerLine
         self.falldown_threshold = self.next_falldown_threshold
+        self.lives = Setup.Lives
         self.has_ball = False
         self.next_additional_line = 0
 
@@ -112,6 +195,7 @@ class Gamestate:
         self.ball_collisions = False
         self.ball_vector = vector_from_angle((random.random() * 4 + 7) * math.pi / 6, self.speed)
         self.has_ball = True
+        self.lives -= 1
 
     def tick(self):
         if self.stopped:
@@ -262,12 +346,16 @@ class Gamestate:
         self.brick_matrix[row][col] = 0
         brick_points = get_brick_points(row)
         self.score += brick_points
+        self.hiscore = max(self.hiscore, self.score)
         self.increase_difficulty(brick_points)
         return (collision_x, collision_y)
 
     def ball_dropped(self):
         self.has_ball = False
         self.stopped = True
+        if self.lives == 0:
+            # game over
+            self.lives -= 1
 
     def increase_difficulty(self, amount):
         self.falldown_threshold -= 1
@@ -281,17 +369,15 @@ class Gamestate:
             coef = newspeed / self.speed
             self.ball_vector = (self.ball_vector[0] * coef, self.ball_vector[1] * coef)
             self.speed = newspeed
-            print "speed {}".format(newspeed)
             self.speedup_threshold = self.next_speedup_threshold
             
-
     def drop_wall(self):
         self.falldown_threshold = self.next_falldown_threshold
         self.next_falldown_threshold = max(10, int(0.92 * self.next_falldown_threshold))
-        print "falldown {}, next {}".format(self.falldown_threshold, self.next_falldown_threshold)
         newline = [Setup.AdditionalLines[self.next_additional_line]] * Setup.BricksPerLine
         self.next_additional_line = (self.next_additional_line + 1) % len(Setup.AdditionalLines)
         self.brick_matrix = [newline] + self.brick_matrix[:-1]
+
 
 class KeyboardController:
     def __init__(self):
@@ -335,6 +421,7 @@ class App:
         self.kbd_controller = KeyboardController()
         self.pot_controller = PotController()
         self.clock = pygame.time.Clock()
+        self.sevenseg = SevenSeg(self.surface)
 
     def _prepare_color_overlay(self):
         self.color_overlay = pygame.Surface(Setup.BoardSize)
@@ -357,8 +444,18 @@ class App:
     def render(self):
         self.surface.fill(Color.black)
 
-        # a bottom bar for better orientation
+        # status bar
         pygame.draw.rect(self.surface, Color.gray, (0, Setup.PaddleTop, Setup.BoardSize[0], Setup.BoardSize[1]))
+        texttop = Setup.PaddleTop + Setup.PaddleSize[1] + 2
+        ninechars = self.sevenseg.charwidth * 9
+        self.sevenseg.draw_text((Setup.Lives * (Setup.BallSize[0]+1) + 2, texttop), '{}'.format(self.state.score))
+        self.sevenseg.draw_text((Setup.BoardSize[0] - ninechars, texttop), 'HI {}'.format(self.state.hiscore))
+        # remaining lives or game over
+        if self.state.lives < 0:
+            self.sevenseg.draw_text(((Setup.BoardSize[0] - ninechars) / 2, texttop), 'GAME OVER')
+        else:
+            for i in range(self.state.lives):
+                pygame.draw.rect(self.surface, Color.white, (i*(Setup.BallSize[0]+1)+1, texttop) + Setup.BallSize)
 
         # draw bricks
         row_idx = 0
@@ -392,7 +489,10 @@ class App:
                     self.stop()
                 elif event.type == pygame.KEYUP:
                     if event.key == pygame.K_SPACE:
-                        self.state.stopped = not self.state.stopped
+                        if self.state.lives < 0:
+                            self.state.reset_game()
+                        else:
+                            self.state.stopped = not self.state.stopped
                     elif event.key == pygame.K_ESCAPE:
                         self.stop()
                     else:

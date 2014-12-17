@@ -254,26 +254,26 @@ class Gamestate:
         # cushion of 1 ball size around the paddle from each side
         big_paddle_left = paddle[0] - Setup.BallSize[0]
         big_paddle_right = big_paddle_left + Setup.PaddleSize[0] + 2 * Setup.BallSize[0]
-        big_paddle_third = (big_paddle_right - big_paddle_left) / 3.0
 
         if ball_x_middle < big_paddle_left or ball_x_middle > big_paddle_right:
             # ball dropped
             self.ball_dropped()
             return newball
         else:
+            big_paddle_40pct = (big_paddle_right - big_paddle_left) * 0.4
             # ball bounces off paddle
-            if ball_x_middle < big_paddle_left + big_paddle_third:
+            if ball_x_middle < big_paddle_left + big_paddle_40pct:
                 # left end of the paddle. Angle in second quadrant based on collision position
-                v = (ball_x_middle - big_paddle_left) / big_paddle_third
-                angle = (math.pi * 11/12) - v * math.pi / 3
+                v = (ball_x_middle - big_paddle_left) / big_paddle_40pct
+                angle = (math.pi * 5/6) - v * math.pi / 3
                 self.ball_vector = vector_from_angle(angle, self.speed)
-            elif ball_x_middle < big_paddle_left + 2 * big_paddle_third:
+            elif ball_x_middle < big_paddle_right - big_paddle_40pct:
                 # middle part of the paddle. Angle preserved
                 self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
             else:
                 # right end of the paddle. Angle in first quadrant based on collision position
-                v = (big_paddle_right - ball_x_middle) / big_paddle_third
-                angle = (math.pi * 1/12) + v * math.pi / 3
+                v = (big_paddle_right - ball_x_middle) / big_paddle_40pct
+                angle = (math.pi * 1/6) + v * math.pi / 3
                 self.ball_vector = vector_from_angle(angle, self.speed)
             # deactivate ball ghost mode after first bounce
             self.ball_collisions = True

@@ -18,24 +18,24 @@ class Setup:
     BoardSize = (320, 240)
     # NOTE: it is important that the length of BrickStartupPattern is the
     #       same as the sum of BrickGroupSizes (which equals to BrickLines)
-    BrickStartupPattern = ([1]*4 + [0]*2)*3 + [0]*(4+2)*2
-    BrickGroupSizes = [6, 6, 6, 6, 6]
+    BrickStartupPattern = ([1]*3 + [0]*2)*3 + [0]*(5+3)
+    BrickGroupSizes = [5, 5, 5, 5, 3]
     BrickGroupPoints = [5, 4, 3, 2, 1, 0]
     BrickLines = sum(BrickGroupSizes)
-    AdditionalLines = [0]*2 + [1]*4
+    AdditionalLines = [0]*2 + [1]*3
 
 # 10 bricks per line: width 30, border 1, margin 0
 # 16 bricks per line: width 18, border 1, margin 0
 # 20 bricks per line: width 14, border 1, margin 0
 # 4 lines per group: height 5, border 1, margin 0, paddletop 222
 # 5 lines per group: height 4, border 1, margin 0, paddletop 222
-    BricksPerLine = 16
-    BrickSize = (18, 5)
+    BricksPerLine = 12
+    BrickSize = (24, 7)
     BrickBorder = (1, 1)
     BallSize = (4, 4)
     PaddleSize = (30, 4)
     PaddleTop = 222
-    BoardMargin = (0, 0)
+    BoardMargin = (4, 0)
 
 
 class Color:

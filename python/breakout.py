@@ -13,6 +13,8 @@ class Setup:
     PaddleLimit = (0, 1024)
     PaddleSpeed = int((PaddleLimit[1] - PaddleLimit[0])/(0.75 * FPS))
     BallSpeed = 2.75
+    MaxSpeed = 4.8   # should be lower than brick height
+    SpeedupCoef = 1.17
     BoardSize = (320, 240)
     # NOTE: it is important that the length of BrickStartupPattern is the
     #       same as the sum of BrickGroupSizes (which equals to BrickLines)
@@ -193,6 +195,7 @@ class Gamestate:
         self.speedup_threshold = self.next_speedup_threshold
         self.ball = (random.randint(0, Setup.BoardSize[0]-1), Setup.BoardSize[1]/3.0)
         self.ball_collisions = False
+        self.ball_skip_one_collision = False
         self.ball_vector = vector_from_angle((random.random() * 4 + 7) * math.pi / 6, self.speed)
         self.has_ball = True
         self.lives -= 1
@@ -239,10 +242,13 @@ class Gamestate:
             # ball is in ghost mode after it has been thrown.
             # no collisions with bricks until it hits the paddle
             return newball
-        brick_index = get_brick_index(newball)
-        if brick_index:
-            return self.collide_with_bricks(newball, brick_index)
-        # no collision
+        if not self.ball_skip_one_collision:
+            centerball = (newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1])
+            brick_index = get_brick_index(centerball)
+            if brick_index:
+                self.collide_with_brick(centerball, *brick_index)
+        else:
+            self.ball_skip_one_collision = False
         return newball
 
     def collide_with_paddle(self, newball):
@@ -280,75 +286,17 @@ class Gamestate:
             self.increase_difficulty(1)
             return (collision_x, collision_y)
 
-    def collide_with_bricks(self, newball, brick_index_topleft):
-        # because the ball is bigger than a pixel, it can collide with up to 4 bricks.
-        # we need to select just one brick to collide with
-        brick_index_bottomright = get_brick_index((newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1]))
-        if not brick_index_bottomright or brick_index_topleft == brick_index_bottomright:
-            colliding_brick_indices = [brick_index_topleft]
-        else:
-            row_min = brick_index_topleft[0]
-            row_max = brick_index_bottomright[0]
-            col_min = brick_index_topleft[1]
-            col_max = brick_index_bottomright[1]
-            if row_min != row_max:
-                # either bottom row first or top row first based on the ball vector direction
-                rows = [ [row_min, row_max], # ball is going down
-                         [row_max, row_min]  # ball is going up
-                       ] [self.ball_vector[1] < 0]
-            else:
-                rows = [row_min]
-            if col_min != col_max:
-                # either left first or right first based on the ball vector direction
-                cols = [ [col_min, col_max], # ball is going right
-                         [col_max, col_min]  # ball is going left
-                       ] [self.ball_vector[0] < 0]
-            else:
-                cols = [col_min]
-            colliding_brick_indices = [(row, col) for row in rows for col in cols]
-
-        for row, col in colliding_brick_indices:
-            if self.brick_matrix[row][col]:
-                return self.collide_with_brick(newball, row, col)
-        # none of the potentially colliding bricks exists in the matrix, no collision
-        return newball
-
     def collide_with_brick(self, newball, row, col):
-        brick = get_brick_rect(row, col)
-        brick_bbox = (brick[0] - Setup.BallSize[0], # left
-                      brick[1] - Setup.BallSize[1], # top
-                      brick[0] + brick[2],          # right
-                      brick[1] + brick[3])          # bottom
+        if self.brick_matrix[row][col] == 0:
+            return
 
-        # first assume that the collision was on the top or the bottom edge
-        if self.ball_vector[1] > 0:
-            # ball going down, collision spot is the top edge of the brick
-            collision_y = brick_bbox[1]
-        else:
-            # ball going up, collision spot is the bottom edge of the brick
-            collision_y = brick_bbox[3]
-        collision_x = self.ball[0] + (collision_y - self.ball[1]) * self.ball_vector[0] / self.ball_vector[1]
-
-        if collision_x >= brick_bbox[0] and collision_x <= brick_bbox[2]:
-            # the collision was indeed on one of the horizontal edges
-            # switch the vertical direction, keep horizontal direction
-            self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
-        else:
-            # the collision was actually on a vertical edge
-            if collision_x < brick_bbox[0]:
-                collision_x = brick_bbox[0]
-            else:
-                collision_x = brick_bbox[2]
-            collision_y = self.ball[1] + (collision_x - self.ball[0]) * self.ball_vector[1] / self.ball_vector[0]
-            # switch the horizontal direction, keep vertical direction
-            self.ball_vector = (-self.ball_vector[0], self.ball_vector[1])
-
+        self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
         self.brick_matrix[row][col] = 0
         brick_points = get_brick_points(row)
         self.score += brick_points
         self.hiscore = max(self.hiscore, self.score)
         self.increase_difficulty(brick_points)
-        return (collision_x, collision_y)
+        self.ball_skip_one_collision = True
 
     def ball_dropped(self):
         self.has_ball = False
@@ -365,7 +313,7 @@ class Gamestate:
         # increase speed
         self.speedup_threshold -= amount
         if self.speedup_threshold <= 0:
-            newspeed = min(self.speed * 1.25, 5.0)
+            newspeed = min(self.speed * Setup.SpeedupCoef, Setup.MaxSpeed)
             coef = newspeed / self.speed
             self.ball_vector = (self.ball_vector[0] * coef, self.ball_vector[1] * coef)
             self.speed = newspeed

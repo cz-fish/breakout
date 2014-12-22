@@ -142,12 +142,47 @@ def get_brick_rect(row, col):
             Setup.BoardMargin[1] + row * t[1] + Setup.BrickBorder[1]) \
            + Setup.BrickSize
 
-def get_brick_index(pos):
-    row = (pos[1] - Setup.BoardMargin[1]) / (Setup.BrickSize[1] + 2 * Setup.BrickBorder[1])
-    if row >= Setup.BrickLines:
-        return None
-    col = (pos[0] - Setup.BoardMargin[0]) / (Setup.BrickSize[0] + 2 * Setup.BrickBorder[0])
-    return (int(row), int(col))
+def get_horizontal_brick_index(x_coord):
+    return min(
+        int((x_coord - Setup.BoardMargin[0]) / (Setup.BrickSize[0] + 2 * Setup.BrickBorder[0])),
+        Setup.BricksPerLine-1)
+
+def get_bricks_on_line(oldball, vector):
+    newball = (oldball[0] + vector[0], oldball[1] + vector[1])
+    row_height = Setup.BrickSize[1] + 2 * Setup.BrickBorder[1]
+    row1 = int((oldball[1] - Setup.BoardMargin[1]) / row_height)
+    row2 = int((newball[1] - Setup.BoardMargin[1]) / row_height)
+    min_row = min(row1, row2)
+    if min_row >= Setup.BrickLines:
+        return []
+    max_row = min(max(row1, row2), Setup.BrickLines-1)
+    steep = vector[0] / vector[1]
+
+    if vector[1] < 0:
+        # ball is going up, pick bottom brick rows first
+        rows = range(max_row, min_row-1, -1)
+    else:
+        # ball is going down, pick top brick rows first
+        rows = range(min_row, max_row+1, 1)
+
+    result = []
+
+    for row in rows:
+        y1 = row * row_height + Setup.BoardMargin[1] + Setup.BrickBorder[1]
+        y2 = y1 + Setup.BrickSize[1]
+        col1 = get_horizontal_brick_index(oldball[0] + steep * (y1 - oldball[1]))
+        col2 = get_horizontal_brick_index(oldball[0] + steep * (y2 - oldball[1]))
+        min_col = min(col1, col2)
+        max_col = max(col1, col2)
+
+        if vector[0] < 0:
+            # ball is going left, pick rightmost bricks first
+            result += [(row, col) for col in range(max_col, min_col-1, -1)]
+        else:
+            # ball is going right, pick leftmost bricks first
+            result += [(row, col) for col in range(min_col, max_col+1, 1)]
+    return result
+
 
 def get_brick_points(row):
     row = max(0, min(Setup.BrickLines, row))
@@ -239,11 +274,7 @@ class Gamestate:
             # ball is in ghost mode after it has been thrown.
             # no collisions with bricks until it hits the paddle
             return newball
-        brick_index = get_brick_index(newball)
-        if brick_index:
-            return self.collide_with_bricks(newball, brick_index)
-        # no collision
-        return newball
+        return self.collide_with_bricks(newball)
 
     def collide_with_paddle(self, newball):
         collision_y = Setup.PaddleTop - Setup.BallSize[1]
@@ -280,40 +311,16 @@ class Gamestate:
             self.increase_difficulty(1)
             return (collision_x, collision_y)
 
-    def collide_with_bricks(self, newball, brick_index_topleft):
-        # because the ball is bigger than a pixel, it can collide with up to 4 bricks.
-        # we need to select just one brick to collide with
-        brick_index_bottomright = get_brick_index((newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1]))
-        if not brick_index_bottomright or brick_index_topleft == brick_index_bottomright:
-            colliding_brick_indices = [brick_index_topleft]
-        else:
-            row_min = brick_index_topleft[0]
-            row_max = brick_index_bottomright[0]
-            col_min = brick_index_topleft[1]
-            col_max = brick_index_bottomright[1]
-            if row_min != row_max:
-                # either bottom row first or top row first based on the ball vector direction
-                rows = [ [row_min, row_max], # ball is going down
-                         [row_max, row_min]  # ball is going up
-                       ] [self.ball_vector[1] < 0]
-            else:
-                rows = [row_min]
-            if col_min != col_max:
-                # either left first or right first based on the ball vector direction
-                cols = [ [col_min, col_max], # ball is going right
-                         [col_max, col_min]  # ball is going left
-                       ] [self.ball_vector[0] < 0]
-            else:
-                cols = [col_min]
-            colliding_brick_indices = [(row, col) for row in rows for col in cols]
-
-        for row, col in colliding_brick_indices:
+    def collide_with_bricks(self, newball):
+#        for row, col in get_bricks_on_line((self.ball[0] + Setup.BallSize[0], self.ball[1] + Setup.BallSize[1]), self.ball_vector):
+        for row, col in get_bricks_on_line(self.ball, self.ball_vector):
             if self.brick_matrix[row][col]:
                 return self.collide_with_brick(newball, row, col)
         # none of the potentially colliding bricks exists in the matrix, no collision
         return newball
 
     def collide_with_brick(self, newball, row, col):
+        impact_str = "br({}, {}), ball({}, {}), vec({}, {})".format(row, col, self.ball[0], self.ball[1], self.ball_vector[0], self.ball_vector[1])
         brick = get_brick_rect(row, col)
         brick_bbox = (brick[0] - Setup.BallSize[0], # left
                       brick[1] - Setup.BallSize[1], # top
@@ -334,6 +341,7 @@ class Gamestate:
             # switch the vertical direction, keep horizontal direction
             self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
         else:
+            impact_str += " w_col({}, {})".format(collision_x, collision_y)
             # the collision was actually on a vertical edge
             if collision_x < brick_bbox[0]:
                 collision_x = brick_bbox[0]
@@ -343,6 +351,7 @@ class Gamestate:
             # switch the horizontal direction, keep vertical direction
             self.ball_vector = (-self.ball_vector[0], self.ball_vector[1])
 
+        print "{}, col({}, {}), nvec({}, {})".format(impact_str, collision_x, collision_y, self.ball_vector[0], self.ball_vector[1])
         self.brick_matrix[row][col] = 0
         brick_points = get_brick_points(row)
         self.score += brick_points

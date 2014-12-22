@@ -149,6 +149,8 @@ def get_brick_index(pos):
     if row >= Setup.BrickLines:
         return None
     col = (pos[0] - Setup.BoardMargin[0]) / (Setup.BrickSize[0] + 2 * Setup.BrickBorder[0])
+    if col < 0 or col >= Setup.BricksPerLine:
+        return None
     return (int(row), int(col))
 
 def get_brick_points(row):

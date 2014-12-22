@@ -175,6 +175,9 @@ def get_color_rects():
         y += pxl_height
     return clrr
 
+def adjacent_bricks(b1, b2):
+    return max(abs(b1[0] - b2[0]), abs(b1[1] - b2[1])) <= 1
+
 class Gamestate:
     def __init__(self):
         self.hiscore = 0
@@ -197,8 +200,8 @@ class Gamestate:
         self.speedup_threshold = self.next_speedup_threshold
         self.ball = (random.randint(0, Setup.BoardSize[0]-1), Setup.BoardSize[1]/3.0)
         self.ball_collisions = False
-        self.ball_skip_one_collision = False
         self.ball_vector = vector_from_angle((random.random() * 4 + 7) * math.pi / 6, self.speed)
+        self.last_brick = (-5, -5)  # dummy indices far outside the board
         self.has_ball = True
         self.lives -= 1
 
@@ -244,13 +247,12 @@ class Gamestate:
             # ball is in ghost mode after it has been thrown.
             # no collisions with bricks until it hits the paddle
             return newball
-        if not self.ball_skip_one_collision:
-            centerball = (newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1])
-            brick_index = get_brick_index(centerball)
-            if brick_index:
+        centerball = (newball[0] + Setup.BallSize[0], newball[1] + Setup.BallSize[1])
+        brick_index = get_brick_index(centerball)
+        if brick_index:
+            if not adjacent_bricks(brick_index, self.last_brick):
+                self.last_brick = (-5, -5)
                 self.collide_with_brick(centerball, *brick_index)
-        else:
-            self.ball_skip_one_collision = False
         return newball
 
     def collide_with_paddle(self, newball):
@@ -292,13 +294,13 @@ class Gamestate:
         if self.brick_matrix[row][col] == 0:
             return
 
+        self.last_brick = (row, col)
         self.ball_vector = (self.ball_vector[0], -self.ball_vector[1])
         self.brick_matrix[row][col] = 0
         brick_points = get_brick_points(row)
         self.score += brick_points
         self.hiscore = max(self.hiscore, self.score)
         self.increase_difficulty(brick_points)
-        self.ball_skip_one_collision = True
 
     def ball_dropped(self):
         self.has_ball = False
